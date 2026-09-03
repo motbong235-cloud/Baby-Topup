@@ -218,6 +218,17 @@ def aba_generate_qr(amount, username, _attempt=1):
                 return aba_generate_qr(amount, username, _attempt=2)
             return None
         if data.get("ok"):
+            # Debug aid: khmer-system.com's docs only mention payment_id/qr_image/
+            # card_image/pay_url/expires_at, but the live response may carry more
+            # fields (e.g. a raw KHQR/EMVCo string, or a real Bakong deep link) that
+            # we're simply not reading yet. Log every key + a short preview so this
+            # can be checked in the Render logs after a real payment is created —
+            # search for "[aba_generate_qr] fields:" and paste that line back.
+            preview = {
+                k: (str(v)[:60] + "…" if isinstance(v, str) and len(str(v)) > 60 else v)
+                for k, v in data.items()
+            }
+            print(f"[aba_generate_qr] fields: {preview}", flush=True)
             return data
         _last_aba_error = f"HTTP {r.status_code} [{data.get('code', '?')}]: {data.get('message') or data}"
         print(f"[aba_generate_qr] failed: {_last_aba_error}", flush=True)
