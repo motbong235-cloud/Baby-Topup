@@ -1,0 +1,413 @@
+<!--
+DESIGN NOTE — BABY TOPUP full-page checkout (Candy Locker, KHQR)
+Modeled on the ABA PayWay hosted checkout page (red banner, payer name,
+big amount, QR, "Scan to pay" / "Download QR"), reskinned into the site's
+existing cotton-candy-pink / Baloo 2 / Kantumruy Pro system instead of
+ABA's red/white, so it reads as part of BABY TOPUP rather than a foreign
+page. A diagonal-cut pink banner replaces ABA's red one; a circular ring
+timer replaces the plain "2:55" text; everything else (QR frame, receipt,
+polling) reuses the same components as the in-app bottom sheet so both
+flows stay visually identical.
+
+Data contract: baby_topup.html writes a JSON payload to
+sessionStorage["baby_checkout_<trxId>"] right before navigating here
+(qr_image/pay_url are one-shot — the backend only returns them from
+create-payment, not from check-payment — so they must be handed off,
+not re-fetched). This page reads ?trx=<trxId> from the URL to find that
+payload; if it's missing (page opened directly / storage cleared), it
+falls back to a "re-open from the shop" message instead of erroring.
+-->
+<!DOCTYPE html>
+<html lang="km">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>ទូទាត់ · BABY TOPUP</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="/icon-192.png" type="image/png">
+<meta name="theme-color" content="#FF6FA0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Nunito:wght@400;500;600;700;800&family=Kantumruy+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#FFF3F8; --paper-2:#FFE6F1; --card:#FFFFFF;
+  --ink:#4A3550; --ink-soft:#9C86A0;
+  --primary:#FF6FA0; --primary-deep:#E8467F; --paid:#2FBE9E; --danger:#FF5C7A; --gold:#FFC94D;
+  --line:#FBD6E6; --line-strong:#F6BFDA; --panel-2:#FFEDF5;
+  --muted:var(--ink-soft);
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+.icon{display:inline-block; vertical-align:-3px; line-height:0;}
+.icon svg{width:1em; height:1em; display:block;}
+html,body{margin:0; padding:0; min-height:100%;
+  background:
+    radial-gradient(ellipse at 12% -10%, rgba(255,201,77,.12), transparent 40%),
+    radial-gradient(ellipse at 100% 6%, rgba(79,216,190,.10), transparent 42%),
+    var(--paper);
+  color:var(--ink); font-family:'Nunito','Kantumruy Pro',sans-serif; overflow-x:hidden;}
+h1,h2,h3,.mono,.amount,.pname,.btn-primary,.timer-num{font-family:'Baloo 2','Kantumruy Pro',sans-serif; letter-spacing:.2px; font-weight:700;}
+a{color:inherit; text-decoration:none;}
+button{font-family:inherit; cursor:pointer; border:none; background:none;}
+::-webkit-scrollbar{display:none;}
+
+#page{max-width:460px; margin:0 auto; min-height:100vh; position:relative; background:var(--paper);}
+@media (min-width:701px){
+  body{display:flex; justify-content:center;}
+  #page{box-shadow:0 0 0 2px var(--line-strong), 0 24px 60px rgba(74,53,80,.25);}
+}
+
+/* ---------- banner (stand-in for ABA's red header) ---------- */
+.banner{position:relative; padding:22px 20px 46px; text-align:center; overflow:hidden;
+  background:linear-gradient(135deg, var(--primary), var(--primary-deep)); color:#fff;
+  clip-path:polygon(0 0,100% 0,100% 82%,0 100%);}
+.banner .wordmark{font-size:22px; font-weight:800; letter-spacing:1px; opacity:.96;}
+.banner .wordmark small{display:block; font-size:10px; letter-spacing:3px; font-weight:700; opacity:.8; margin-top:3px;}
+.banner .backlink{position:absolute; top:18px; left:16px; width:32px; height:32px; border-radius:50%;
+  background:rgba(255,255,255,.18); display:flex; align-items:center; justify-content:center; color:#fff;}
+.banner .backlink svg{width:16px; height:16px;}
+
+/* ---------- checkout card ---------- */
+.checkout-card{position:relative; margin:-34px 16px 0; background:var(--card); border-radius:24px;
+  border:2px solid var(--line-strong); box-shadow:0 14px 30px rgba(74,53,80,.16); padding:22px 20px 20px;}
+.co-top{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
+.co-title{font-size:15px; font-weight:800; color:var(--ink); display:flex; align-items:center; gap:7px;}
+.co-title .dot{width:9px; height:9px; border-radius:50%; background:var(--primary); flex-shrink:0;}
+
+/* circular ring countdown, stand-in for ABA's "2:55" chip */
+.ring-timer{position:relative; width:44px; height:44px; flex-shrink:0;}
+.ring-timer svg{width:44px; height:44px; transform:rotate(-90deg);}
+.ring-timer circle{fill:none; stroke-width:4;}
+.ring-timer .bg{stroke:var(--line-strong);}
+.ring-timer .fg{stroke:var(--primary); stroke-linecap:round; transition:stroke-dashoffset 1s linear;}
+.ring-timer .num{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font-size:9.5px; font-weight:800; color:var(--ink); font-family:'Baloo 2',sans-serif;}
+
+.payer-block{text-align:center; padding:6px 0 16px;}
+.payer-block .label{font-size:11px; color:var(--muted); font-weight:800; letter-spacing:.4px; text-transform:uppercase;}
+.payer-block .pname{font-size:16px; color:var(--ink); margin-top:4px;}
+.amount{text-align:center; font-size:34px; font-weight:800; color:var(--ink); margin-bottom:2px;}
+.amount .cur{font-size:14px; font-weight:800; color:var(--muted); margin-left:4px;}
+.sub-label{text-align:center; color:var(--muted); font-size:12px; font-weight:700; margin-bottom:16px;}
+
+.divider{border:none; border-top:2px dashed var(--line-strong); margin:0 0 18px;}
+
+@keyframes qrPulse{0%,100%{box-shadow:0 4px 14px rgba(255,111,160,.12);} 50%{box-shadow:0 6px 20px rgba(255,111,160,.3);}}
+.qr-frame{background:#fff; padding:16px; margin:0 auto 14px; width:min(220px,64vw); position:relative; overflow:hidden;
+  border:2px solid var(--line-strong); border-radius:22px; animation:qrPulse 2.4s ease-in-out infinite;}
+.qr-frame img{width:100%; height:auto; display:block; position:relative; z-index:1;}
+.qr-frame.missing{display:flex; align-items:center; justify-content:center; aspect-ratio:1/1; color:var(--muted); font-size:12px; text-align:center; animation:none;}
+
+.scan-label{text-align:center; font-size:15px; font-weight:800; color:var(--ink); margin-bottom:6px;}
+.or-sep{text-align:center; color:var(--muted); font-size:12px; margin-bottom:8px;}
+.dl-link{display:flex; align-items:center; justify-content:center; gap:6px; text-align:center; margin:0 auto 10px;
+  color:var(--paid); font-size:13.5px; font-weight:800;}
+.dl-link svg{width:15px; height:15px;}
+.helper-text{text-align:center; color:var(--muted); font-size:11.5px; line-height:1.5; margin-bottom:18px;}
+
+.pay-url-btn{display:block; width:100%; text-align:center; padding:13px; margin-bottom:12px;
+  background:var(--primary); color:#fff; border-radius:999px; font-weight:800; font-size:14px;
+  box-shadow:0 6px 16px rgba(255,111,160,.35);}
+
+.pay-status{text-align:center; padding:13px; border-radius:16px; font-size:14px; font-weight:700;
+  display:flex; align-items:center; justify-content:center; gap:6px; border:2px dashed var(--line-strong); margin-bottom:6px;}
+.pay-status.waiting{background:var(--panel-2); color:var(--muted);}
+@keyframes stampSlam{0%{opacity:0; transform:scale(1.5);} 70%{opacity:1; transform:scale(.94);} 100%{opacity:1; transform:scale(1);}}
+.pay-status.success{background:rgba(47,190,158,.12); color:var(--paid); border:2px solid var(--paid); border-style:solid; animation:stampSlam .4s cubic-bezier(.2,.8,.2,1) both;}
+.pay-status.processing{background:rgba(255,201,77,.16); color:#8A5A00; border-color:var(--gold); border-style:solid;}
+.pay-status.failed{background:rgba(255,92,122,.12); color:var(--danger); border:2px solid var(--danger); border-style:solid; animation:stampSlam .4s cubic-bezier(.2,.8,.2,1) both;}
+
+@keyframes fadeUp{from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:translateY(0);}}
+.receipt{margin-top:16px; background:var(--panel-2); border:2px dashed var(--line-strong); border-radius:18px; padding:14px 16px; animation:fadeUp .3s ease both;}
+.receipt-row{display:flex; justify-content:space-between; gap:12px; padding:6px 0; font-size:13px; border-bottom:1.5px dotted var(--line-strong);}
+.receipt-row:last-child{border-bottom:none;}
+.receipt-row .l{color:var(--muted);}
+.receipt-row .v{font-family:'Baloo 2',sans-serif; font-weight:700; text-align:right; color:var(--ink);}
+.receipt-total{display:flex; justify-content:space-between; margin-top:8px; padding-top:10px; border-top:2px solid var(--line-strong); font-weight:800;}
+.receipt-total .v{font-family:'Baloo 2',sans-serif; color:var(--primary); font-size:16px;}
+.giftcard-code-box{margin-top:10px; padding:14px; border-radius:16px; background:var(--card); border:2px dashed var(--gold); text-align:center;}
+.giftcard-code-box .l{font-size:11.5px; color:var(--muted); margin-bottom:6px; font-weight:800;}
+.giftcard-code-box .code-value{font-family:'Baloo 2',sans-serif; font-size:15px; font-weight:800; color:var(--ink); letter-spacing:.3px; word-break:break-all;}
+.copy-receipt-btn{width:100%; margin-top:12px; padding:12px; border-radius:999px; background:var(--primary); color:#fff; font-weight:800; font-size:13px;
+  display:flex; align-items:center; justify-content:center; gap:6px; transition:background .2s ease;}
+.copy-receipt-btn.copied{background:var(--paid);}
+
+.back-shop-btn{display:block; width:100%; text-align:center; margin-top:14px; padding:13px; background:var(--panel-2);
+  color:var(--muted); border-radius:999px; font-weight:800; border:2px solid var(--line-strong);}
+
+.trust-note{display:flex; align-items:center; justify-content:center; gap:6px; margin:18px 0 30px; color:var(--muted); font-size:11px; font-weight:700;}
+.trust-note svg{width:13px; height:13px; color:var(--paid); flex-shrink:0;}
+
+.empty-state{padding:60px 24px; text-align:center; color:var(--muted); font-size:13.5px; display:flex; flex-direction:column; align-items:center; gap:14px;}
+.empty-state a{color:#fff; background:var(--primary); padding:12px 26px; border-radius:999px; font-weight:800; font-family:'Baloo 2',sans-serif;}
+
+.toast{position:fixed; left:16px; right:16px; bottom:20px; z-index:200; padding:13px 16px; border-radius:16px;
+  background:var(--card); color:var(--ink); font-size:13.5px; text-align:center; font-weight:700;
+  border:2px solid var(--line-strong); box-shadow:0 6px 20px rgba(255,111,160,.2);
+  transform:translateY(120%); transition:transform .25s ease; max-width:428px; margin:0 auto;}
+.toast.show{transform:translateY(0);}
+.toast.err{background:rgba(255,92,122,.12); color:var(--danger); border-color:var(--danger);}
+@media (prefers-reduced-motion: reduce){ *{transition:none !important; animation:none !important;} }
+</style>
+</head>
+<body>
+<div id="page"></div>
+<div id="toast" class="toast"></div>
+
+<script>
+(function(){
+"use strict";
+
+const PAY_TIMEOUT_SECONDS = 300; // must match backend's KHQR expiry window
+let countdownTimer = null, pollPayTimer = null, pollTopupTimer = null;
+
+function $(sel, root){ return (root||document).querySelector(sel); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function toast(msg, isErr){
+  const t = $("#toast");
+  t.textContent = msg;
+  t.className = "toast show" + (isErr ? " err" : "");
+  clearTimeout(toast._h);
+  toast._h = setTimeout(()=> t.classList.remove("show"), 3200);
+}
+async function api(path, opts){
+  opts = opts || {};
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
+  try {
+    const res = await fetch("/api/" + path, {
+      method: opts.method || "GET",
+      headers: Object.assign({"Content-Type":"application/json"}, opts.headers||{}),
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+      signal: controller.signal,
+    });
+    let data;
+    try { data = await res.json(); } catch(e){ data = {}; }
+    if (!res.ok && data.success === undefined) data = { success:false, error: data.error || `Server error (${res.status})` };
+    return data;
+  } catch (e) {
+    const msg = e.name === "AbortError" ? "ការតភ្ជាប់យឺតពេក សូមសាកល្បងម្តងទៀត" : "មិនអាចភ្ជាប់ទៅ server បានទេ — សូមពិនិត្យអ៊ីនធឺណិត";
+    return { success:false, error: msg };
+  } finally { clearTimeout(timeoutId); }
+}
+function fmtDateTime(iso){
+  if(!iso) return "—";
+  const d = new Date(iso);
+  if(isNaN(d.getTime())) return "—";
+  const pad = n => String(n).padStart(2,"0");
+  return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function deliveryStatusLabel(ds){
+  if(ds === "delivered") return "✓ បានបញ្ជូនស្វ័យប្រវត្តិ";
+  if(ds === "processing") return "កំពុងបញ្ជូន";
+  if(ds === "failed") return "បញ្ជូនមិនកើត — ត្រូវការ manual";
+  return "រង់ចាំ admin បញ្ជូន";
+}
+
+// ---- load handoff payload written by baby_topup.html before it navigated here ----
+const params = new URLSearchParams(location.search);
+const trxId = params.get("trx");
+let payload = null;
+try { payload = trxId ? JSON.parse(sessionStorage.getItem("baby_checkout_" + trxId) || "null") : null; }
+catch(e){ payload = null; }
+
+const page = $("#page");
+
+if(!trxId || !payload){
+  page.innerHTML = `
+    <div class="empty-state">
+      <div style="font-size:34px">⚠️</div>
+      <div>រកមិនឃើញព័ត៌មានការទូទាត់នេះទេ (session ផុតកំណត់ ឬបានបើកទំព័រនេះដោយផ្ទាល់)</div>
+      <a href="/">ត្រឡប់ទៅហាងវិញ</a>
+    </div>`;
+  return;
+}
+
+const RING_R = 18, RING_C = 2 * Math.PI * RING_R;
+
+page.innerHTML = `
+  <div class="banner">
+    <a class="backlink" href="/" aria-label="ត្រឡប់ក្រោយ">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 6 9 12 15 18"/></svg>
+    </a>
+    <div class="wordmark">BABY TOPUP<small>ទូទាត់តាម KHQR</small></div>
+  </div>
+
+  <div class="checkout-card">
+    <div class="co-top">
+      <div class="co-title"><span class="dot"></span>ស្កេន QR ដើម្បីទូទាត់</div>
+      <div class="ring-timer">
+        <svg viewBox="0 0 44 44">
+          <circle class="bg" cx="22" cy="22" r="${RING_R}"/>
+          <circle class="fg" id="ringFg" cx="22" cy="22" r="${RING_R}" stroke-dasharray="${RING_C}" stroke-dashoffset="0"/>
+        </svg>
+        <div class="num" id="ringNum">5:00</div>
+      </div>
+    </div>
+
+    <div class="payer-block">
+      <div class="label">${payload.idLabel ? esc(payload.idLabel) : "អតិថិជន"}</div>
+      <div class="pname">${esc(payload.payerName || payload.userId || "—")}</div>
+    </div>
+    <div class="amount">$${Number(payload.amount || 0).toFixed(2)}<span class="cur">USD</span></div>
+    <div class="sub-label">${esc(payload.productName || "")}${payload.gameName ? " · " + esc(payload.gameName) : ""}</div>
+
+    <hr class="divider">
+
+    <div class="qr-frame ${payload.qrImage ? "" : "missing"}" id="qrFrame">
+      ${payload.qrImage ? `<img src="${payload.qrImage}" alt="KHQR">` : "QR មិនអាចបង្ហាញបានទេ — សូមប្រើប៊ូតុងខាងក្រោម"}
+    </div>
+    <div class="scan-label">ស្កេនដើម្បីទូទាត់</div>
+    <div class="or-sep">ឬ</div>
+    <a class="dl-link" id="dlLink" download="baby-topup-khqr.png" href="${payload.qrImage || "#"}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v13"/><path d="M7 11l5 5 5-5"/><path d="M5 21h14"/></svg>
+      ទាញយក QR
+    </a>
+    <div class="helper-text">រួចបញ្ចូលទៅកម្មវិធី Mobile Banking ណាមួយដែលគាំទ្រ KHQR</div>
+
+    ${payload.payUrl ? `<a class="pay-url-btn" id="payUrlBtn" href="${esc(payload.payUrl)}" target="_blank" rel="noopener">បើកកម្មវិធីធនាគារ</a>` : ""}
+
+    <div class="pay-status waiting" id="payStatus">កំពុងរង់ចាំការទូទាត់...</div>
+    <div id="receiptSlot"></div>
+
+    <button class="back-shop-btn" id="backBtn">បិទ / ត្រឡប់ទៅហាង</button>
+
+    <div class="trust-note">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><polyline points="9 12 11 14 15 9.5"/></svg>
+      ទូទាត់សុវត្ថិភាព · ដំណើរការដោយ ABA PayWay
+    </div>
+  </div>`;
+
+$("#backBtn").onclick = () => {
+  clearInterval(pollPayTimer); clearInterval(pollTopupTimer); clearInterval(countdownTimer);
+  if(trxId) api("expire-payment", {method:"POST", body:{trx_id: trxId}}).catch(()=>{});
+  sessionStorage.removeItem("baby_checkout_" + trxId);
+  location.href = "/";
+};
+
+// ---- auto-open ABA Mobile ----
+// Navigating to payUrl is a universal link: if ABA Mobile is installed, the OS
+// intercepts it and foregrounds the app (this browser tab stays alive in the
+// background — it's the exact "Open this page in ABA Mobile?" handoff ABA's own
+// hosted page triggers). If the app isn't installed, this just lands on ABA's
+// own hosted KHQR page as a fallback, same as tapping the button manually.
+// A short delay lets the branded QR page paint first instead of an instant blank flash.
+if(payload.payUrl){
+  setTimeout(() => {
+    try{ window.location.href = payload.payUrl; }catch(e){}
+  }, 500);
+}
+if($("#payUrlBtn")) $("#payUrlBtn").textContent = "បើកម្តងទៀត";
+
+function setPayStatus(kind, html){
+  const el = $("#payStatus");
+  if(!el) return;
+  el.className = "pay-status " + kind;
+  el.innerHTML = html;
+}
+function setRing(secondsLeft){
+  const m = String(Math.floor(secondsLeft/60)).padStart(1,"0");
+  const s = String(secondsLeft%60).padStart(2,"0");
+  const numEl = $("#ringNum");
+  if(numEl) numEl.textContent = `${m}:${s}`;
+  const fg = $("#ringFg");
+  if(fg) fg.style.strokeDashoffset = String(RING_C * (1 - secondsLeft / PAY_TIMEOUT_SECONDS));
+}
+
+function receiptText(order){
+  const lines = [
+    `វិក័យប័ត្រ BABY TOPUP`,
+    `Trx ID: ${trxId}`,
+    `ថ្ងៃ: ${fmtDateTime(order.paid_at || order.created_at)}`,
+    `ហ្គេម: ${payload.gameName || order.game_code}`,
+    `Package: ${payload.productName || ""}`,
+  ];
+  if(!payload.isGiftcard) lines.push(`${payload.idLabel || "Player ID"}: ${order.user_id}${order.zone_id ? " ("+order.zone_id+")" : ""}`);
+  lines.push(`តម្លៃ: $${Number(order.amount).toFixed(2)}`);
+  lines.push(`ស្ថានភាព: ${deliveryStatusLabel(order.delivery_status)}`);
+  if(order.delivery_code) lines.push(`Gift Card Code: ${order.delivery_code}`);
+  return lines.join("\n");
+}
+function renderReceipt(order){
+  const slot = $("#receiptSlot");
+  if(!slot) return;
+  slot.innerHTML = `
+    <div class="receipt">
+      <div class="receipt-row"><span class="l">Trx ID</span><span class="v">${esc(trxId)}</span></div>
+      <div class="receipt-row"><span class="l">ថ្ងៃ</span><span class="v">${esc(fmtDateTime(order.paid_at || order.created_at))}</span></div>
+      <div class="receipt-row"><span class="l">Package</span><span class="v">${esc(payload.productName || "")}</span></div>
+      ${payload.isGiftcard ? "" : `<div class="receipt-row"><span class="l">${esc(payload.idLabel || "Player ID")}</span><span class="v">${esc(order.user_id)}${order.zone_id ? " ("+esc(order.zone_id)+")" : ""}</span></div>`}
+      <div class="receipt-row"><span class="l">ស្ថានភាព</span><span class="v">${esc(deliveryStatusLabel(order.delivery_status))}</span></div>
+      <div class="receipt-total"><span>សរុប</span><span class="v">$${Number(order.amount).toFixed(2)}</span></div>
+      ${order.delivery_code ? `
+        <div class="giftcard-code-box">
+          <div class="l">Gift Card Code — redeem លើ roblox.com</div>
+          <div class="code-value">${esc(order.delivery_code)}</div>
+        </div>` : ""}
+      <button class="copy-receipt-btn" id="copyReceiptBtn">ចម្លងវិក័យប័ត្រ</button>
+    </div>`;
+  $("#copyReceiptBtn").onclick = async () => {
+    const btn = $("#copyReceiptBtn");
+    try{
+      await navigator.clipboard.writeText(receiptText(order));
+      btn.classList.add("copied");
+      btn.textContent = "បានចម្លង!";
+      setTimeout(()=>{ btn.classList.remove("copied"); btn.textContent = "ចម្លងវិក័យប័ត្រ"; }, 2000);
+    }catch(e){ toast("មិនអាចចម្លងបានទេ", true); }
+  };
+}
+function handleDeliveryStatus(ds, order){
+  if(ds === "delivered"){
+    setPayStatus("success", "ទូទាត់ជោគជ័យ — ទទួល Diamond ដោយស្វ័យប្រវត្តិ!");
+  } else if(ds === "processing"){
+    setPayStatus("processing", "កំពុងបញ្ជូន Diamond ស្វ័យប្រវត្តិ...");
+    pollTopupTimer = setInterval(async () => {
+      const r = await api("check-topup-status", {method:"POST", body:{trx_id: trxId}});
+      if(r.delivery_status === "delivered"){
+        clearInterval(pollTopupTimer);
+        setPayStatus("success", "ទូទាត់ជោគជ័យ — ទទួល Diamond ដោយស្វ័យប្រវត្តិ!");
+        if(order){ order.delivery_status = "delivered"; renderReceipt(order); }
+      } else if(r.delivery_status === "failed"){
+        clearInterval(pollTopupTimer);
+        setPayStatus("failed", "ទូទាត់ជោគជ័យ ប៉ុន្តែបញ្ជូនស្វ័យប្រវត្តិមិនកើត — ទាក់ទង admin");
+        if(order){ order.delivery_status = "failed"; renderReceipt(order); }
+      }
+    }, 4000);
+  } else if(ds === "failed"){
+    setPayStatus("failed", "ទូទាត់ជោគជ័យ ប៉ុន្តែបញ្ជូនស្វ័យប្រវត្តិមិនកើត — ទាក់ទង admin");
+  } else {
+    setPayStatus("success", "ទូទាត់ជោគជ័យ — admin នឹងបញ្ជូនជូនក្នុងពេលឆាប់ៗ");
+  }
+  if(order) renderReceipt(order);
+}
+
+// ---- countdown + polling ----
+let secondsLeft = PAY_TIMEOUT_SECONDS;
+setRing(secondsLeft);
+countdownTimer = setInterval(() => {
+  secondsLeft--;
+  setRing(Math.max(secondsLeft, 0));
+  if(secondsLeft <= 0){
+    clearInterval(countdownTimer);
+    api("expire-payment", {method:"POST", body:{trx_id: trxId}});
+    setPayStatus("failed", "QR ផុតកំណត់ — សូមត្រឡប់ទៅហាងហើយចាប់ផ្តើមម្តងទៀត");
+    clearInterval(pollPayTimer);
+  }
+}, 1000);
+
+pollPayTimer = setInterval(async () => {
+  const r = await api("check-payment", {method:"POST", body:{trx_id: trxId}});
+  if(r.paid){
+    clearInterval(pollPayTimer);
+    clearInterval(countdownTimer);
+    handleDeliveryStatus((r.data && r.data.delivery_status) || null, r.data || null);
+  } else if(r.expired){
+    clearInterval(pollPayTimer);
+    clearInterval(countdownTimer);
+    setPayStatus("failed", "QR ផុតកំណត់ — សូមត្រឡប់ទៅហាងហើយចាប់ផ្តើមម្តងទៀត");
+  }
+}, 3000);
+
+})();
+</script>
+</body>
+</html>
