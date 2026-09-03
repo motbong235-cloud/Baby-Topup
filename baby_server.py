@@ -484,6 +484,31 @@ def _seed_from_defaults(data):
     return changed
 
 
+_DB_SCHEMA_DEFAULTS = {
+    "games": [],
+    "products": [],
+    "banners": [],
+    "transactions": [],
+    "site_settings": {},
+    "next_ids": {},
+}
+
+
+def _ensure_schema(data):
+    """Backfill any top-level keys the code expects (site_settings, transactions,
+    etc.) that are missing from an older db.json or from db_default.json. Several
+    endpoints do a hard data["key"] index with no .get(), so a missing key throws
+    KeyError -> 500 (this is the exact 'Internal server error' the Settings/Ledger
+    panel hit — db.json predated the site_settings feature and had no such key).
+    Returns True if anything was added, so the caller knows to persist it."""
+    changed = False
+    for key, default in _DB_SCHEMA_DEFAULTS.items():
+        if key not in data:
+            data[key] = dict(default) if isinstance(default, dict) else list(default)
+            changed = True
+    return changed
+
+
 def _load_db():
     if not os.path.exists(DB_PATH):
         if os.path.exists(DEFAULT_DB_PATH):
@@ -494,12 +519,15 @@ def _load_db():
             # empty-but-valid schema instead of crashing (this is the exact
             # FileNotFoundError PVH TOPUP hit on its first deploy).
             print("WARNING: db_default.json not found — starting with an empty database.")
-            data = {"games": [], "products": [], "banners": [], "orders": [], "next_ids": {}}
+            data = {}
+        _ensure_schema(data)
         _save_db(data)
         return data
     with open(DB_PATH, "r", encoding="utf-8") as f:
         data = json.load(f)
-    if _seed_from_defaults(data):
+    seeded = _seed_from_defaults(data)
+    backfilled = _ensure_schema(data)
+    if seeded or backfilled:
         _save_db(data)
     return data
 
@@ -867,6 +895,12 @@ def _no_cache_html(directory, filename):
 @app.route("/")
 def serve_index():
     return _no_cache_html(STATIC_DIR, "baby_topup.html")
+
+
+@app.route("/checkout.html")
+@app.route("/checkout")
+def serve_checkout():
+    return _no_cache_html(STATIC_DIR, "baby_checkout.html")
 
 
 @app.route("/terms")

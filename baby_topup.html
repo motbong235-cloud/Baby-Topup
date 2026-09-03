@@ -694,7 +694,25 @@ async function buyNow(){
       toast(r.error || "បង្កើត QR មិនជោគជ័យ", true);
       return;
     }
-    openPaymentSheet(r.trx_id, r.qr_image, r.pay_url, amount);
+    const g = state.activeGame, p = state.selectedProduct;
+    const isGiftcard = g && g.fulfillment_type === "giftcard";
+    const checkoutPayload = {
+      amount,
+      qrImage: r.qr_image,
+      payUrl: r.pay_url,
+      userId,
+      zoneId: state.zoneId || "",
+      gameName: g ? g.name : (state.activeGame && state.activeGame.code) || "",
+      productName: p ? p.name : "",
+      isGiftcard,
+      idLabel: isGiftcard ? "" : (isTelegramGame(g) ? "Telegram Username" : "Player ID"),
+      payerName: isGiftcard ? (state.settings ? state.settings.SITE_NAME : "BABY TOPUP") : userId,
+    };
+    try{
+      sessionStorage.setItem("baby_checkout_" + r.trx_id, JSON.stringify(checkoutPayload));
+    }catch(e){ /* storage unavailable — checkout page will show its fallback screen */ }
+    location.href = "/checkout.html?trx=" + encodeURIComponent(r.trx_id);
+    return;
   } catch (e) {
     // Belt-and-suspenders: api() itself shouldn't throw anymore, but if
     // anything else in this block does, never leave the button stuck.
