@@ -284,19 +284,12 @@ $("#backBtn").onclick = () => {
   location.href = "/";
 };
 
-// ---- auto-open ABA Mobile ----
-// Navigating to payUrl is a universal link: if ABA Mobile is installed, the OS
-// intercepts it and foregrounds the app (this browser tab stays alive in the
-// background — it's the exact "Open this page in ABA Mobile?" handoff ABA's own
-// hosted page triggers). If the app isn't installed, this just lands on ABA's
-// own hosted KHQR page as a fallback, same as tapping the button manually.
-// A short delay lets the branded QR page paint first instead of an instant blank flash.
-if(payload.payUrl){
-  setTimeout(() => {
-    try{ window.location.href = payload.payUrl; }catch(e){}
-  }, 500);
-}
-if($("#payUrlBtn")) $("#payUrlBtn").textContent = "បើកម្តងទៀត";
+// Note: no auto-open attempt lives here anymore. A script-triggered redirect
+// on a freshly-loaded page (no fresh tap on THIS page) is not treated as a
+// genuine user gesture by iOS/Android, so it never actually opened ABA
+// Mobile — it just silently did nothing. The real attempt now happens in
+// buyNow() on the shop page, riding the "ទិញឥឡូវ" tap itself. This button
+// stays as the reliable manual way to (re)try opening the app.
 
 function setPayStatus(kind, html){
   const el = $("#payStatus");

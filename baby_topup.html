@@ -711,7 +711,28 @@ async function buyNow(){
     try{
       sessionStorage.setItem("baby_checkout_" + r.trx_id, JSON.stringify(checkoutPayload));
     }catch(e){ /* storage unavailable — checkout page will show its fallback screen */ }
-    location.href = "/checkout.html?trx=" + encodeURIComponent(r.trx_id);
+
+    const checkoutUrl = "/checkout.html?trx=" + encodeURIComponent(r.trx_id);
+    if(r.pay_url){
+      // This MUST fire as a direct continuation of the tap that called buyNow() —
+      // iOS/Android only honor an app-link handoff when it rides the user's own
+      // gesture. A redirect attempted later, from a freshly-loaded page with no
+      // fresh tap on it, is silently ignored (that's exactly why it wasn't
+      // opening ABA Mobile before: the attempt lived on checkout.html, a page
+      // the user never tapped anything on).
+      //
+      // If ABA Mobile is installed, the OS intercepts this navigation and
+      // foregrounds the app — this tab is never actually unloaded, so the
+      // timer below still runs and quietly moves this tab to our own branded
+      // checkout page for when the user comes back. If the app isn't
+      // installed, the browser genuinely navigates to pay_url (ABA's own
+      // hosted page) and this tab is gone — the timer below simply never
+      // gets the chance to fire.
+      try{ window.location.href = r.pay_url; }catch(e){}
+      setTimeout(() => { location.href = checkoutUrl; }, 900);
+    } else {
+      location.href = checkoutUrl;
+    }
     return;
   } catch (e) {
     // Belt-and-suspenders: api() itself shouldn't throw anymore, but if
